@@ -1,37 +1,44 @@
 import streamlit as st
-# Import your other necessary libraries (tensorflow, numpy, etc.)
+# Import other necessary libraries (tensorflow, numpy, etc.)
 
-# --- STEP 1: FIX THE ADVICE FUNCTION ---
-def get_nutrient_advice(prediction):
-    """
-    This function must ALWAYS return exactly two strings:
-    (Nutrient Deficiency, Recommended Action)
-    """
-    # Example logic - replace with your actual class names
-    if prediction == "Healthy":
-        return "None", "Your plant is healthy! Keep up the good work."
-    elif prediction == "Yellowish":
-        return "Nitrogen Deficiency", "Apply a nitrogen-rich fertilizer or compost."
-    elif prediction == "Brown Spots":
-        return "Potassium/Fungal issue", "Check soil moisture and apply balanced NPK."
+# --- STEP 1: DEFINE THE ADVICE FUNCTION ---
+def get_nutrient_advice(prediction_label):
+    # Ensure every path returns exactly TWO strings
+    if prediction_label == "Healthy":
+        return "Optimal", "No immediate action required. Maintain current care."
+    elif prediction_label == "Yellow Leaf":
+        return "Nitrogen Deficiency", "Apply a nitrogen-rich fertilizer or organic compost."
     
-    # CRITICAL: The 'else' or 'default' return prevents the ValueError
-    return "Analyzing...", "Try taking a clearer photo of the leaf in better light."
+    # Default return to prevent ValueError
+    return "Unknown", "Please provide a clearer image for specific advice."
 
-# --- STEP 2: UPDATE THE MAIN APP LOGIC ---
+# --- STEP 2: APP UI ---
 st.title("AgroMind Ultimate")
-st.write("Processing Leaf Image...")
+st.write("Upload a leaf image for disease and nutrient analysis.")
 
-# Assuming 'prediction' is the output from your model
-# We wrap the call in a try-except block for extra safety
-try:
-    # This is the line that was crashing in your screenshot
-    nut, nut_adv = get_nutrient_advice(prediction)
-except Exception as e:
-    # If anything goes wrong, the app stays running with these defaults
-    nut, nut_adv = "Pending Diagnosis", "Ensure the leaf is centered in the frame."
+# IMPORTANT: Initialize 'prediction' as None so the app doesn't crash
+prediction = None 
 
-# --- STEP 3: DISPLAY RESULTS ---
-st.subheader(f"Detected Condition: {prediction}")
-st.write(f"**Nutrient Status:** {nut}")
-st.write(f"**Action Plan:** {nut_adv}")
+# Example: Replace this with your actual image upload and model logic
+uploaded_file = st.file_uploader("Choose a leaf image...", type=["jpg", "png", "jpeg"])
+
+if uploaded_file is not None:
+    st.image(uploaded_file, caption='Uploaded Image', use_column_width=True)
+    st.write("Processing Leaf Image...")
+    
+    # --- YOUR MODEL LOGIC GOES HERE ---
+    # Example: prediction = your_model.predict(processed_image)
+    # For now, we will set a dummy prediction for testing:
+    prediction = "Healthy" 
+
+# --- STEP 3: DISPLAY RESULTS (Only if prediction exists) ---
+if prediction is not None:
+    try:
+        nut, nut_adv = get_nutrient_advice(prediction)
+        st.subheader(f"Detected Condition: {prediction}")
+        st.write(f"**Nutrient Status:** {nut}")
+        st.write(f"**Action Plan:** {nut_adv}")
+    except Exception as e:
+        st.error("Error in processing results. Please check the model output.")
+else:
+    st.info("Waiting for image upload to start analysis.")
