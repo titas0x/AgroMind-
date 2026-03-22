@@ -5,42 +5,52 @@ import numpy as np
 import datetime
 
 # -----------------------------
-# Leaf Health Analysis
+# Leaf Health & Pest Analysis
 # -----------------------------
-def calculate_health(image, dryness_level, pests_level, texture_score=50):
+def calculate_health_and_pests(image, dryness_level, texture_score=50):
     img_array = np.array(image)
     r, g, b = img_array[:,:,0], img_array[:,:,1], img_array[:,:,2]
 
-    # Detect unhealthy areas: yellow/brown (high R, medium G, low B)
-    unhealthy_mask = ((r > 100) & (g < 150) & (b < 100))
-    unhealthy_ratio = np.sum(unhealthy_mask) / (img_array.shape[0]*img_array.shape[1])
-    color_health = max(0, 100 - unhealthy_ratio*120)
+    # Detect unhealthy areas (yellow/brown)
+    damage_mask = ((r > 100) & (g < 150) & (b < 100))
+    damage_ratio = np.sum(damage_mask)/(img_array.shape[0]*img_array.shape[1])
+    color_health = max(0, 100 - damage_ratio*120)
+
+    # Detect visible pests (dark spots: low G & B)
+    pest_mask = ((r < 100) & (g < 100) & (b < 100))
+    pest_ratio = np.sum(pest_mask)/(img_array.shape[0]*img_array.shape[1])
+    pests_health = max(0, 100 - pest_ratio*150)
 
     dryness_health = max(0, 100 - dryness_level)
-    pests_health = max(0, 100 - pests_level)
     texture_health = max(0, texture_score)
 
-    health = (color_health*0.4 + dryness_health*0.25 + pests_health*0.25 + texture_health*0.1)
+    # Weighted overall health
+    health = (color_health*0.35 + dryness_health*0.25 + pests_health*0.25 + texture_health*0.15)
     damage = 100 - health
-    confidence = (color_health + dryness_health + (100-pests_level) + texture_health)/4
+    confidence = (color_health + dryness_health + pests_health + texture_health)/4
 
-    return round(health,2), round(damage,2), round(confidence,2), unhealthy_mask
+    return round(health,2), round(damage,2), round(confidence,2), damage_mask, pest_mask
 
-def generate_heatmap(image, unhealthy_mask):
+def generate_heatmap(image, damage_mask, pest_mask):
     overlay = Image.new('RGBA', image.size, (255,0,0,0))
     overlay_array = np.array(overlay)
-    overlay_array[unhealthy_mask] = [255,0,0,150]  # red overlay for damage
+
+    # Red for damaged areas
+    overlay_array[damage_mask] = [255,0,0,150]
+    # Blue for pest spots
+    overlay_array[pest_mask] = [0,0,255,150]
+
     heatmap = Image.alpha_composite(image.convert('RGBA'), Image.fromarray(overlay_array))
     return heatmap
 
-def treatment_recommendation(health, damage):
+def treatment_recommendation(health, damage, pest_ratio):
     soil_moisture = max(0, int(50 - (health/2)))
     water_stress = max(0, 50 - soil_moisture)
     treatment = {
         'Watering (ml/day)': max(100, water_stress*20),
         'Nitrogen Fertilizer (g/week)': 10 if damage>20 else 5,
         'Potassium Fertilizer (g/week)': 5 if damage>30 else 2,
-        'Pesticide (ml/week)': 5 if damage>30 else 0,
+        'Pesticide (ml/week)': 5 if pest_ratio>0.01 else 0,
         'Fungicide (ml/week)': 5 if damage>25 else 0
     }
     return treatment
@@ -54,7 +64,7 @@ tabs = st.tabs(["Leaf Analysis", "Farming Knowledge"])
 # Leaf Analysis Tab
 # -----------------------------
 with tabs[0]:
-    st.title("🌱 AgroMind: Leaf Health & Treatment System")
+    st.title("🌱 AgroMind: Leaf Health & Pest Analysis System")
 
     if 'start_analysis' not in st.session_state:
         st.session_state['start_analysis'] = False
@@ -65,10 +75,9 @@ with tabs[0]:
     ### Instructions
     1. Click **Start Analysis**.
     2. Capture/upload leaf images.
-    3. Input dryness, pest, and optionally texture score.
-    4. View per-leaf heatmap, health metrics, and dynamic treatment suggestions.
-    5. Add to history, track leaves, view batch totals.
-    6. Download CSV summary or reset.
+    3. Input dryness and optional texture score.
+    4. View per-leaf heatmap, health, pests, and treatment.
+    5. Add to history, track batch, download CSV.
     """)
 
     if st.button("Start Analysis"):
@@ -90,7 +99,6 @@ with tabs[0]:
 
         if leaf_images:
             global_dryness = st.slider("Default Dryness Level (%)", 0, 100, 10)
-            global_pests = st.slider("Default Pest Level (%)", 0, 100, 5)
             global_texture = st.slider("Leaf Texture Score (0-100)", 0, 100, 50)
             batch_results = []
 
@@ -99,17 +107,17 @@ with tabs[0]:
                 st.markdown(f"### Leaf {idx+1}")
 
                 dryness_level = st.slider(f"Leaf {idx+1} Dryness (%)", 0, 100, global_dryness, key=f"dry{idx}")
-                pests_level = st.slider(f"Leaf {idx+1} Pest Level (%)", 0, 100, global_pests, key=f"pest{idx}")
                 texture_score = st.slider(f"Leaf {idx+1} Texture (0-100)", 0, 100, global_texture, key=f"tex{idx}")
 
-                health, damage, confidence, unhealthy_mask = calculate_health(image, dryness_level, pests_level, texture_score)
-                treatment = treatment_recommendation(health, damage)
-                heatmap = generate_heatmap(image, unhealthy_mask)
+                health, damage, confidence, damage_mask, pest_mask = calculate_health_and_pests(image, dryness_level, texture_score)
+                pest_ratio = np.sum(pest_mask)/(np.array(image).shape[0]*np.array(image).shape[1])
+                treatment = treatment_recommendation(health, damage, pest_ratio)
+                heatmap = generate_heatmap(image, damage_mask, pest_mask)
 
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.image(heatmap, caption=f"Leaf {idx+1} Damage Heatmap", use_column_width=True)
-                    st.write(f"Health: {health}%, Damage: {damage}%, Confidence: {confidence}%")
+                    st.image(heatmap, caption=f"Leaf {idx+1} Damage & Pest Heatmap", use_column_width=True)
+                    st.write(f"Health: {health}%, Damage: {damage}%, Confidence: {confidence}%, Pest ratio: {round(pest_ratio*100,2)}%")
                 with col2:
                     st.write("Dynamic Treatment Suggestions:")
                     treatment_df = pd.DataFrame.from_dict(treatment, orient='index', columns=['Quantity'])
@@ -129,8 +137,8 @@ with tabs[0]:
                     'Damage %': damage,
                     'Confidence %': confidence,
                     'Dryness': dryness_level,
-                    'Pest Level': pests_level,
                     'Texture': texture_score,
+                    'Pest ratio': round(pest_ratio*100,2),
                     'Treatment': treatment
                 })
 
@@ -139,6 +147,7 @@ with tabs[0]:
                         'Leaf': idx+1,
                         'Health %': health,
                         'Damage %': damage,
+                        'Pest ratio %': round(pest_ratio*100,2),
                         'Date': datetime.datetime.now()
                     })
                     st.success(f"Leaf {idx+1} added to history!")
@@ -162,8 +171,8 @@ with tabs[0]:
                 'Damage %': r['Damage %'],
                 'Confidence %': r['Confidence %'],
                 'Dryness': r['Dryness'],
-                'Pest Level': r['Pest Level'],
-                'Texture': r['Texture']
+                'Texture': r['Texture'],
+                'Pest ratio %': r['Pest ratio']
             } for r in batch_results])
             csv = csv_df.to_csv(index=False).encode('utf-8')
             st.download_button("Download CSV", data=csv, file_name="batch_leaf_summary.csv", mime="text/csv")
@@ -181,41 +190,11 @@ with tabs[1]:
     st.subheader(f"{crop} Care Guide & Stages")
     
     guides = {
-        "Tomato": {
-            "Growth": "Seedling → Vegetative → Flowering → Fruiting",
-            "Water": "500 ml per plant every 2 days",
-            "Fertilizer": "Nitrogen every 2 weeks, Potassium every 3 weeks",
-            "Pests": "Aphids, Whiteflies",
-            "Harvest": "70–80 days after planting; ripe fruits fully red"
-        },
-        "Spinach": {
-            "Growth": "Seedling → Leaf Growth",
-            "Water": "300 ml per plant daily",
-            "Fertilizer": "Balanced NPK once a week",
-            "Pests": "Leaf miners",
-            "Harvest": "30–40 days; harvest outer leaves first"
-        },
-        "Rice": {
-            "Growth": "Seedling → Tillering → Panicle Initiation → Maturity",
-            "Water": "Maintain flooded fields early; adjust per stage",
-            "Fertilizer": "Nitrogen every 20 days, Phosphorus at planting",
-            "Pests": "Stem borers",
-            "Harvest": "3–4 months; grains golden-yellow"
-        },
-        "Wheat": {
-            "Growth": "Germination → Tillering → Heading → Maturity",
-            "Water": "Moderate; irrigate every 7–10 days",
-            "Fertilizer": "Nitrogen 20 days after sowing",
-            "Pests": "Aphids, Armyworms",
-            "Harvest": "Grains hard; straw golden"
-        },
-        "Potato": {
-            "Growth": "Sprouting → Vegetative → Tuber formation → Maturity",
-            "Water": "600 ml per plant every 3 days",
-            "Fertilizer": "Nitrogen early, Potassium mid-growth",
-            "Pests": "Colorado potato beetle",
-            "Harvest": "70–120 days; tubers firm, skin tough"
-        }
+        "Tomato": {"Growth": "Seedling → Vegetative → Flowering → Fruiting", "Water": "500 ml per plant every 2 days", "Fertilizer": "Nitrogen every 2 weeks, Potassium every 3 weeks", "Pests": "Aphids, Whiteflies", "Harvest": "70–80 days; ripe fruits fully red"},
+        "Spinach": {"Growth": "Seedling → Leaf Growth", "Water": "300 ml per plant daily", "Fertilizer": "Balanced NPK once a week", "Pests": "Leaf miners", "Harvest": "30–40 days; harvest outer leaves first"},
+        "Rice": {"Growth": "Seedling → Tillering → Panicle Initiation → Maturity", "Water": "Maintain flooded fields early; adjust per stage", "Fertilizer": "Nitrogen every 20 days, Phosphorus at planting", "Pests": "Stem borers", "Harvest": "3–4 months; grains golden-yellow"},
+        "Wheat": {"Growth": "Germination → Tillering → Heading → Maturity", "Water": "Moderate; irrigate every 7–10 days", "Fertilizer": "Nitrogen 20 days after sowing", "Pests": "Aphids, Armyworms", "Harvest": "Grains hard; straw golden"},
+        "Potato": {"Growth": "Sprouting → Vegetative → Tuber formation → Maturity", "Water": "600 ml per plant every 3 days", "Fertilizer": "Nitrogen early, Potassium mid-growth", "Pests": "Colorado potato beetle", "Harvest": "70–120 days; tubers firm, skin tough"}
     }
 
     g = guides[crop]
