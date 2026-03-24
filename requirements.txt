@@ -1,4 +1,6 @@
 streamlit
+opencv-python
+pillow
 numpy
 pandas
-pillow
+google-generativeai
